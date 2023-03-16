@@ -13,6 +13,8 @@ from modules.paths import models_path
 from basicsr.utils.download_util import load_file_from_url
 
 from scripts.openpose.body import Body
+from scripts.openpose.hand import Hand
+from scripts.openpose import util
 
 body_estimation = None
 presets_file = os.path.join(scripts.basedir(), "presets.json")
@@ -37,9 +39,13 @@ def candidate2li(li):
     res.append([x, y])
   return res
 
-def subset2li(li):
+def subset2li(li,li2):
   res = []
   for r in li:
+    for c in r:
+      res.append(c)
+  
+  for r in li2:
     for c in r:
       res.append(c)
   return res
@@ -89,8 +95,38 @@ def on_ui_tabs():
           control_net_max_models_num = getattr(opts, 'control_net_max_models_num', 0)
           select_target_index = gr.Dropdown([str(i) for i in range(control_net_max_models_num)], label="Send to", value="0", interactive=True, visible=(control_net_max_models_num > 1))
 
+    def estimation(img):
+      global body_estimation
+      global hand_estimation
+
+      candidate, subset = body_estimation(img)
+      # detect hand
+      hands_list = util.handDetect(candidate, subset, img)
+
+      all_hand_peaks = []
+      for x, y, w, is_left in hands_list:
+          # cv2.rectangle(canvas, (x, y), (x+w, y+w), (0, 255, 0), 2, lineType=cv2.LINE_AA)
+          # cv2.putText(canvas, 'left' if is_left else 'right', (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+          # if is_left:
+              # plt.imshow(oriImg[y:y+w, x:x+w, :][:, :, [2, 1, 0]])
+              # plt.show()
+          peaks = hand_estimation(img[y:y+w, x:x+w, :])
+          peaks[:, 0] = np.where(peaks[:, 0]==0, peaks[:, 0], peaks[:, 0]+x)
+          peaks[:, 1] = np.where(peaks[:, 1]==0, peaks[:, 1], peaks[:, 1]+y)
+          # else:
+          #     peaks = hand_estimation(cv2.flip(oriImg[y:y+w, x:x+w, :], 1))
+          #     peaks[:, 0] = np.where(peaks[:, 0]==0, peaks[:, 0], w-peaks[:, 0]-1+x)
+          #     peaks[:, 1] = np.where(peaks[:, 1]==0, peaks[:, 1], peaks[:, 1]+y)
+          #     print(peaks)
+          all_hand_peaks.append(peaks)
+      # subset.appendAll(all_hand_peaks)
+      
+      return candidate,subset,all_hand_peaks
+
     def estimate(img):
       global body_estimation
+      global hand_estimation
 
       if body_estimation is None:
         model_path = os.path.join(models_path, "openpose", "body_pose_model.pth")
@@ -98,15 +134,23 @@ def on_ui_tabs():
           body_model_path = "https://huggingface.co/lllyasviel/ControlNet/resolve/main/annotator/ckpts/body_pose_model.pth"
           load_file_from_url(body_model_path, model_dir=os.path.join(models_path, "openpose"))
         body_estimation = Body(model_path)
+      
+      if hand_estimation is None:
+        model_path = os.path.join(models_path, "openpose", "hand_pose_model.pth")
+        if not os.path.isfile(model_path):
+          hand_model_path = "https://huggingface.co/lllyasviel/ControlNet/resolve/main/annotator/ckpts/hand_pose_model.pth"
+          load_file_from_url(hand_model_path, model_dir=os.path.join(models_path, "openpose"))
+        hand_estimation = Hand(model_path)
         
-      candidate, subset = body_estimation(pil2cv(img))
+      candidate, subset,hand_peaks = estimation(img)
 
       result = {
         "candidate": candidate2li(candidate),
-        "subset": subset2li(subset)
+        "subset": subset2li(subset,hand_peaks)
       }
       
       return result
+
 
     def savePreset(name, data):
       if name:

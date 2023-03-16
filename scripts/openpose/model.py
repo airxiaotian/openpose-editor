@@ -1,5 +1,3 @@
-# This code from https://github.com/lllyasviel/ControlNet
-
 import torch
 from collections import OrderedDict
 
